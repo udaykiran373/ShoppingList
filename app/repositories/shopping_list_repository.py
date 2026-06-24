@@ -53,7 +53,7 @@ class ShoppingListRepository:
             page_size: Number of results per page.
             search: Optional substring to filter by name.
 
-        Returns:
+        Returns:   
             Tuple of (list of documents, total count).
         """
         query: dict = {"is_deleted": False}
@@ -78,10 +78,16 @@ class ShoppingListRepository:
         """
         try:
             oid = ObjectId(list_id)
+            doc = await self.collection.find_one({"_id": oid, "is_deleted": False})
+            return _to_response(doc) if doc else None
         except InvalidId:
+            logger.error(f"invalid id")
             return None
-        doc = await self.collection.find_one({"_id": oid, "is_deleted": False})
-        return _to_response(doc) if doc else None
+
+        except Exception as e:
+            logger.error(f"unexpected error {str(e)}")
+            return None
+
 
     async def update(self, list_id: str, data: dict) -> Optional[dict]:
         """

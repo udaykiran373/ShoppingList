@@ -74,13 +74,18 @@ class ShoppingListService:
             HTTPException: 404 if not found.
         """
         doc = await self.repo.get_by_id(list_id)
-        if not doc:
-            logger.error(f"Shopping list not found. list_id={list_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
-            )
-        return doc
+
+        if doc:
+             return doc
+
+        logger.error(f"Shopping list not found. list_id={list_id}")
+        raise HTTPException(
+           status_code=status.HTTP_404_NOT_FOUND,
+           detail={
+              "message": "Shopping list not found",
+              "error_code": "SHOPPING_LIST_NOT_FOUND"
+            },
+        )
 
     async def update_shopping_list(self, list_id: str, data: ShoppingListUpdate) -> dict:
         """

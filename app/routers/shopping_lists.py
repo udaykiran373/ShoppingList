@@ -47,7 +47,7 @@ async def create_shopping_list(
 
 
 @router.get(
-    "",
+    "/getlist",
     summary="List all shopping lists",
     description="Retrieves all shopping lists with optional name search and pagination.",
     response_model=PaginatedShoppingListResponse,
