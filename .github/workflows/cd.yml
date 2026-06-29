@@ -22,8 +22,17 @@ jobs:
           docker save shopping-api -o shopping-api.tar
 
       - name: Zip Docker Image
-        run: mkdir images
+        run: |
+          mkdir images
           cp shopping-api.tar images
+          zip images.zip images
+
+      - name: Copy Docker Image to Images Folder
+        run: |
+          cp shopping-api.tar images
+
+      - name: zip Docker image Folder
+        run: |
           zip images.zip images
 
       - name: Upload Docker Zip Artifact
