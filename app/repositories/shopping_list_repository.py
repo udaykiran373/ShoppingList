@@ -100,8 +100,8 @@ class ShoppingListRepository:
             return None
 
         except Exception as e:
-            logger.exception(f"Failed to retrieve shopping list {str(e)}")
-            return None
+            logger.exception(f"Failed to retrieve shopping list database error {str(e)}")
+            raise
 
 
     async def update(self, list_id: str, data: dict) -> Optional[dict]:
@@ -123,7 +123,7 @@ class ShoppingListRepository:
             result=await self.collection.find_one_and_update(
                 {"_id":ObjectId(list_id),"is_deleted":False},
                 {"$set":update_data},
-                return_document=ReturnDocument.After
+                return_document=ReturnDocument.AFTER
             )
             if result:
                 return _to_response(result)
@@ -147,6 +147,7 @@ class ShoppingListRepository:
         try:
             if not ObjectId.is_valid(list_id):
                 logger.info(f"invalid objectid received:{list_id}")
+                return False
 
             result = await self.collection.update_one(
                 {"_id": ObjectId(list_id), "is_deleted": False},

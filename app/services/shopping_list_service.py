@@ -31,24 +31,34 @@ class ShoppingListService:
         Returns:
             Newly created shopping list document.
         """
-        doc = {
-            "name": data.name,
-            "description": data.description or "",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-        }
-        result = await self.repo.create(doc)
-        if result is None:
-            logger.error("Failed to create shopping list.")
+        try:
+            doc = {
+                "name": data.name,
+                "description": data.description or "",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            result = await self.repo.create(doc)
+            if result is None:
+                logger.error("Failed to create shopping list.")
+                raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                        "message": "Failed to create shopping list",
+                        "error_code": "SHOPPING_LIST_CREATE_FAILED"
+                        }
+                )
+            logger.info(f"shopping list created succesfully list_id={result['id']}")
+            return result
+        except Exception:
+            logger.exception("Unexpected error while creating shopping list.")
             raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={
-                      "message": "Failed to create shopping list",
-                      "error_code": "SHOPPING_LIST_CREATE_FAILED"
-                    }
+                status_code=500,
+                detail={
+                    "message": "Unable to create shopping list",
+                    "error_code": "DATABASE_ERROR",
+                },
             )
-        logger.info(f"shopping list created succesfully list_id={result['id']}")
-        return result
 
     async def get_all_shopping_lists(
         self,
@@ -67,9 +77,21 @@ class ShoppingListService:
         Returns:
             Tuple of (list of shopping list dicts, total count).
         """
-        if search:
-            search = search.strip()
-        return await self.repo.get_all(page=page, page_size=page_size, search=search)
+        try:
+            if search:
+                search = search.strip()
+            items,total= await self.repo.get_all(page=page, page_size=page_size, search=search)
+            logger.info(f"Retrieved {len(items)} shopping lists.")
+            return items, total
+        except Exception:
+            logger.exception("Unable to retrieve shopping lists.")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "Unable to retrieve shopping lists",
+                    "error_code": "DATABASE_ERROR",
+                },
+            )
 
     async def get_shopping_list(self, list_id: str) -> dict:
         """
@@ -84,20 +106,33 @@ class ShoppingListService:
         Raises:
             HTTPException: 404 if not found.
         """
-        doc = await self.repo.get_by_id(list_id)
+        try:
+            doc = await self.repo.get_by
+            _id(list_id)
 
-        if doc:
-             return doc
+            if doc:
+                return doc
 
-        logger.info(f"Shopping list not found. list_id={list_id}")
-        raise HTTPException(
-           status_code=status.HTTP_404_NOT_FOUND,
-           detail={
-              "message": "Shopping list not found",
-              "error_code": "SHOPPING_LIST_NOT_FOUND"
-            },
-        )
+            logger.info(f"Shopping list not found. list_id={list_id}")
+            raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": "Shopping list not found",
+                "error_code": "SHOPPING_LIST_NOT_FOUND"
+                },
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception(f"Unable to retrieve shopping list. list_id={list_id}")
 
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "Unable to retrieve shopping list",
+                    "error_code": "DATABASE_ERROR",
+                },
+            )
     async def update_shopping_list(self, list_id: str, data: ShoppingListUpdate) -> dict:
         """
         Update a shopping list's fields.
@@ -112,21 +147,32 @@ class ShoppingListService:
         Raises:
             HTTPException: 404 if not found, 400 if no fields provided.
         """
-        updates = data.model_dump(exclude_none=True)
-        if not updates:
+        try:
+            updates = data.model_dump(exclude_none=True)
+            if not updates:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"message": "No fields provided for update", "error_code": "NO_UPDATE_FIELDS"},
+                )
+            result = await self.repo.update(list_id, updates)
+            if not result:
+                logger.info(f"Shopping list not found for update. list_id={list_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
+                )
+            logger.info(f"Shopping list updated successfully. list_id={list_id}")
+            return result
+        except Exception:
+            logger.exception(f"Unable to update shopping list. list_id={list_id}")
+
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "No fields provided for update", "error_code": "NO_UPDATE_FIELDS"},
+                status_code=500,
+                detail={
+                    "message": "Unable to update shopping list",
+                    "error_code": "DATABASE_ERROR",
+                },
             )
-        result = await self.repo.update(list_id, updates)
-        if not result:
-            logger.info(f"Shopping list not found for update. list_id={list_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
-            )
-        logger.info(f"Shopping list updated successfully. list_id={list_id}")
-        return result
 
     async def delete_shopping_list(self, list_id: str) -> None:
         """
@@ -138,12 +184,25 @@ class ShoppingListService:
         Raises:
             HTTPException: 404 if not found.
         """
-        deleted = await self.repo.soft_delete(list_id)
-        if not deleted:
-            logger.info(f"Shopping list not found for deletion. list_id={list_id}")
+        try:
+            deleted = await self.repo.soft_delete(list_id)
+            if not deleted:
+                logger.info(f"Shopping list not found for deletion. list_id={list_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
+                )
+            await self.item_repo.delete_by_list_id(list_id)
+            logger.info(f"Shopping list deleted successfully. list_id={list_id}")
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception(f"Unable to delete shopping list. list_id={list_id}")
+
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
+                status_code=500,
+                detail={
+                    "message": "Unable to delete shopping list",
+                    "error_code": "DATABASE_ERROR",
+                },
             )
-        await self.item_repo.delete_by_list_id(list_id)
-        logger.info(f"Shopping list deleted successfully. list_id={list_id}")

@@ -75,21 +75,41 @@ class ShoppingItemService:
         Returns:
             List of created item documents.
         """
-        await self._assert_list_exists(list_id)
-        docs = [
-            {
-                "name": item.name,
-                "quantity": item.quantity,
-                "unit": item.unit,
-                "purchased": item.purchased,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }
-            for item in items
-        ]
-        results = await self.repo.bulk_create(list_id, docs)
-        logger.info(f"Bulk items created. list_id={list_id} count={len(results)}")
-        return results
+        try:
+            await self._assert_list_exists(list_id)
+            docs = [
+                {
+                    "name": item.name,
+                    "quantity": item.quantity,
+                    "unit": item.unit,
+                    "purchased": item.purchased,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                }
+                for item in items
+            ]
+            results = await self.repo.bulk_create(list_id, docs)
+            if results:
+                logger.info(f"Bulk items created. list_id={list_id} count={len(results)}")
+
+                return results
+            logger.error(f"Bulk item creation failed. list_id={list_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message": "Failed to create shopping items",
+                    "error_code": "BULK_ITEM_CREATE_FAILED",
+                },
+            )
+        except Exception:
+            logger.exception(f"Unexpected error while creating bulk items. list_id={list_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message": "Unable to create shopping items",
+                    "error_code": "DATABASE_ERROR",
+                },
+            )
 
     async def get_all_items(
         self,
@@ -142,15 +162,25 @@ class ShoppingItemService:
         Raises:
             HTTPException: 404 if not found.
         """
-        await self._assert_list_exists(list_id)
-        doc = await self.repo.get_by_id(list_id, item_id)
-        if not doc:
-            logger.info(f"Item not found. list_id={list_id} item_id={item_id}")
+        try:
+            await self._assert_list_exists(list_id)
+            doc = await self.repo.get_by_id(list_id, item_id)
+            if not doc:
+                logger.info(f"Item not found. list_id={list_id} item_id={item_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"message": "Item not found", "error_code": "ITEM_NOT_FOUND"},
+                )
+            return doc
+        except Exception:
+            logger.exception(f"Failed to retrieve shopping item. item_id={item_id}")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": "Item not found", "error_code": "ITEM_NOT_FOUND"},
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message": "Unable to retrieve shopping item",
+                    "error_code": "DATABASE_ERROR",
+                },
             )
-        return doc
 
     async def update_item(self, list_id: str, item_id: str, data: ShoppingItemUpdate) -> dict:
         """
@@ -167,22 +197,34 @@ class ShoppingItemService:
         Raises:
             HTTPException: 400 if no fields provided, 404 if not found.
         """
-        updates = data.model_dump(exclude_none=True)
-        if not updates:
+        try:
+            updates = data.model_dump(exclude_none=True)
+            if not updates:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"message": "No fields provided for update", "error_code": "NO_UPDATE_FIELDS"},
+                )
+            await self._assert_list_exists(list_id)
+            result = await self.repo.update(list_id, item_id, updates)
+            if not result:
+                logger.error(f"Item not found for update. list_id={list_id} item_id={item_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"message": "Item not found", "error_code": "ITEM_NOT_FOUND"},
+                )
+            logger.info(f"Item updated successfully. list_id={list_id} item_id={item_id}")
+            return result
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception(f"Failed to update shopping item. item_id={item_id}")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"message": "No fields provided for update", "error_code": "NO_UPDATE_FIELDS"},
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message": "Unable to update shopping item",
+                    "error_code": "DATABASE_ERROR",
+                },
             )
-        await self._assert_list_exists(list_id)
-        result = await self.repo.update(list_id, item_id, updates)
-        if not result:
-            logger.error(f"Item not found for update. list_id={list_id} item_id={item_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": "Item not found", "error_code": "ITEM_NOT_FOUND"},
-            )
-        logger.info(f"Item updated successfully. list_id={list_id} item_id={item_id}")
-        return result
 
     async def delete_item(self, list_id: str, item_id: str) -> None:
         """
@@ -195,15 +237,27 @@ class ShoppingItemService:
         Raises:
             HTTPException: 404 if not found.
         """
-        await self._assert_list_exists(list_id)
-        deleted = await self.repo.soft_delete(list_id, item_id)
-        if not deleted:
-            logger.error(f"Item not found for deletion. list_id={list_id} item_id={item_id}")
+        try:
+            await self._assert_list_exists(list_id)
+            deleted = await self.repo.soft_delete(list_id, item_id)
+            if not deleted:
+                logger.error(f"Item not found for deletion. list_id={list_id} item_id={item_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"message": "Item not found", "error_code": "ITEM_NOT_FOUND"},
+                )
+            logger.info(f"Item deleted successfully. list_id={list_id} item_id={item_id}")
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception(f"Failed to delete shopping item. item_id={item_id}")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"message": "Item not found", "error_code": "ITEM_NOT_FOUND"},
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message": "Unable to delete shopping item",
+                    "error_code": "DATABASE_ERROR",
+                },
             )
-        logger.info(f"Item deleted successfully. list_id={list_id} item_id={item_id}")
 
     async def mark_all_purchased(self, list_id: str) -> dict:
         """
@@ -215,7 +269,19 @@ class ShoppingItemService:
         Returns:
             Dict with count of updated items.
         """
-        await self._assert_list_exists(list_id)
-        count = await self.repo.mark_all_purchased(list_id)
-        logger.info(f"Marked {count} items as purchased. list_id={list_id}")
-        return {"updated": count}
+        try:
+            await self._assert_list_exists(list_id)
+            count = await self.repo.mark_all_purchased(list_id)
+            logger.info(f"Marked {count} items as purchased. list_id={list_id}")
+            return {"updated": count}
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception(f"Failed to mark all items as purchased. list_id={list_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message": "Unable to mark items as purchased",
+                    "error_code": "DATABASE_ERROR",
+                },
+            )
