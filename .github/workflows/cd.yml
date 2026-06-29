@@ -21,7 +21,11 @@ jobs:
         run: |
           docker save shopping-api -o shopping-api.tar
 
-      - name: Upload Docker Image Artifact
+      - name: Zip Docker Image
+        run: |
+          zip shopping-api.zip shopping-api.tar
+
+      - name: Upload Docker Zip Artifact
         uses: actions/upload-artifact@v4
         with:
           name: shopping-api-image
