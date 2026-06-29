@@ -24,16 +24,20 @@ jobs:
       - name: Zip Docker Image
         run: |
           mkdir images
-          cp shopping-api.tar images
-          zip images.zip images
 
       - name: Copy Docker Image to Images Folder
         run: |
-          cp shopping-api.tar images
+          cp shopping-api.tar images/
 
       - name: zip Docker image Folder
         run: |
-          zip images.zip images
+          cd images
+          zip -r ../images.zip .
+
+      - name: Verify Files
+        run: |
+          ls -lh
+          ls -lh images
 
       - name: Upload Docker Zip Artifact
         uses: actions/upload-artifact@v4
