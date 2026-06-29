@@ -17,38 +17,36 @@ jobs:
         run: |
           docker build -t shopping-api .
 
-      - name: List Docker Images
-        run: |
-          docker images
-
       - name: Save Docker Image
         run: |
-          docker save shopping-api -o shopping-api.tar shopping-api
+          docker save -o shopping-api.tar shopping-api
 
-      - name: Check TAR File
+      - name: Verify TAR File
         run: |
           ls -lh shopping-api.tar
           file shopping-api.tar
 
-      - name: Zip Docker Image
+      - name: Create Images Folder
         run: |
-          mkdir images
+          mkdir -p images
 
-      - name: Copy Docker Image to Images Folder
+      - name: Copy TAR File to Images Folder
         run: |
           cp shopping-api.tar images/
 
-      - name: zip Docker image Folder
+      - name: Verify Images Folder
         run: |
-          cd images
-          zip -r ../images.zip .
-
-      - name: Verify Files
-        run: |
-          ls -lh
           ls -lh images
 
-      - name: Upload Docker Zip Artifact
+      - name: Zip Images Folder
+        run: |
+          zip -r images.zip images
+
+      - name: Verify ZIP File
+        run: |
+          ls -lh images.zip
+
+      - name: Upload ZIP Artifact
         uses: actions/upload-artifact@v4
         with:
           name: shopping-api-image
