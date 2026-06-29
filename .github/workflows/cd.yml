@@ -23,7 +23,12 @@ jobs:
 
       - name: Save Docker Image
         run: |
-          docker save shopping-api -o shopping-api.tar
+          docker save shopping-api -o shopping-api.tar shopping-api
+
+      - name: Check TAR File
+        run: |
+          ls -lh shopping-api.tar
+          file shopping-api.tar
 
       - name: Zip Docker Image
         run: |
