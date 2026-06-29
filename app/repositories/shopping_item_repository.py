@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from bson import ObjectId
 from bson.errors import InvalidId
 from app.utils.logger import get_logger
+from pymongo import ReturnDocument
 
 logger = get_logger(__name__)
 
@@ -24,7 +25,7 @@ class ShoppingItemRepository:
     def __init__(self, db):
         self.collection = db["shopping_items"]
 
-    async def create(self, list_id: str, data: dict) -> dict:
+    async def create(self, list_id: str, data: dict) -> Optional[dict]:
         """
         Insert a new shopping item document.
 
@@ -35,11 +36,20 @@ class ShoppingItemRepository:
         Returns:
             The created document with string id.
         """
-        data["list_id"] = list_id
-        data["is_deleted"] = False
-        result = await self.collection.insert_one(data)
-        doc = await self.collection.find_one({"_id": result.inserted_id})
-        return _to_response(doc)
+        try:
+            document={**data,"list_id":list_id,"is_deleted":False}
+            result=await self.collection.insert_one(document)
+            doc=await self.collection.find_one({"_id":result.inserted_id})
+            if doc:
+                logger.info("item created succesfully")
+                return _to_response(doc)
+            logger.error(f"inserted item couldnot retrieved {list_id}")
+            return None
+        except Exception as e:
+            logger.exception(f"failed to create shopping item {str(e)}")
+            return None
+
+        
 
     async def bulk_create(self, list_id: str, items: List[dict]) -> List[dict]:
         """
@@ -52,14 +62,24 @@ class ShoppingItemRepository:
         Returns:
             List of created item documents.
         """
-        for item in items:
-            item["list_id"] = list_id
-            item["is_deleted"] = False
-        result = await self.collection.insert_many(items)
-        docs = []
-        async for doc in self.collection.find({"_id": {"$in": result.inserted_ids}}):
-            docs.append(_to_response(doc))
-        return docs
+        try:
+            documents=[
+                {
+                    **item,
+                    "list_id":list_id,
+                    "is_deleted":False,
+                }
+                for item in items
+            ]
+            result=await self.collection.insert_many(documents)
+            docs=[]
+            async for doc in self.collection.find({"_id":{"$in":result.inserted_ids}}):
+                docs.append(_to_response(doc))
+            return docs
+
+        except Exception as e:
+            logger.exception(f"failed to create bulk items {list_id}")
+            return []
 
     async def get_all(
         self,
@@ -80,15 +100,19 @@ class ShoppingItemRepository:
         Returns:
             Tuple of (list of item dicts, total count).
         """
-        query: dict = {"list_id": list_id, "is_deleted": False}
-        if search:
-            query["$text"] = {"$search": search}
+        try:
+            query: dict = {"list_id": list_id, "is_deleted": False}
+            if search:
+                query["$text"] = {"$search": search}
 
-        total = await self.collection.count_documents(query)
-        skip = (page - 1) * page_size
-        cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(page_size)
-        docs = [_to_response(doc) async for doc in cursor]
-        return docs, total
+            total = await self.collection.count_documents(query)
+            skip = (page - 1) * page_size
+            cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(page_size)
+            docs = [_to_response(doc) async for doc in cursor]
+            return docs, total
+        except Exception:
+            logger.exception(f"failed to get shopping items {list_id}")
+            raise
 
     async def get_by_id(self, list_id: str, item_id: str) -> Optional[dict]:
         """
@@ -102,11 +126,19 @@ class ShoppingItemRepository:
             Item document dict or None if not found.
         """
         try:
-            oid = ObjectId(item_id)
-        except InvalidId:
+            if not ObjectId.is_valid(item_id):
+                logger.warning(f"Invalid ObjectId received: {item_id}")
+                return None
+            doc = await self.collection.find_one({"_id": ObjectId(item_id), "list_id": list_id, "is_deleted": False})
+            if doc:
+                logger.info(f"item fetched succesfully{item_id}")
+                return _to_response((doc))
+            logger.info(f"shoppping item not found {item_id}")
+        except Exception:
+            logger.exception(f"Failed to retrieve shopping item. item_id={item_id}")
             return None
-        doc = await self.collection.find_one({"_id": oid, "list_id": list_id, "is_deleted": False})
-        return _to_response(doc) if doc else None
+        
+    
 
     async def update(self, list_id: str, item_id: str, data: dict) -> Optional[dict]:
         """
@@ -121,16 +153,21 @@ class ShoppingItemRepository:
             Updated item document dict or None if not found.
         """
         try:
-            oid = ObjectId(item_id)
-        except InvalidId:
+            if not ObjectId.is_valid(item_id):
+                logger.warning(f"Invalid ObjectId received: {item_id}")
+            updated_data={**data,"updated_at":datetime.utcnow()}
+            
+            result = await self.collection.find_one_and_update(
+                {"_id": ObjectId(item_id), "list_id": list_id, "is_deleted": False},
+                {"$set": updated_data},
+                return_document=ReturnDocument.AFTER,
+            )
+            if result:
+                return _to_response(result)
+            logger.info(f"Shopping item not found. item_id={item_id}")
+        except Exception:
+            logger.exception(f"Failed to update shopping item. item_id={item_id}")
             return None
-        data["updated_at"] = datetime.utcnow()
-        result = await self.collection.find_one_and_update(
-            {"_id": oid, "list_id": list_id, "is_deleted": False},
-            {"$set": data},
-            return_document=True,
-        )
-        return _to_response(result) if result else None
 
     async def soft_delete(self, list_id: str, item_id: str) -> bool:
         """
@@ -144,14 +181,36 @@ class ShoppingItemRepository:
             True if deleted, False if not found.
         """
         try:
-            oid = ObjectId(item_id)
-        except InvalidId:
+            if not ObjectId.is_valid(item_id):
+                logger.warning(
+                    f"Invalid ObjectId received: {item_id}"
+                )
+                return False
+
+            result = await self.collection.update_one(
+                {
+                    "_id": ObjectId(item_id),
+                    "list_id": list_id,
+                    "is_deleted": False,
+                },
+                {
+                    "$set": {
+                        "is_deleted": True,
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
+            )
+
+            if result.modified_count == 0:
+                logger.info(
+                    f"Shopping item not found for deletion. item_id={item_id}"
+                )
+                return False
+
+            return True
+        except Exception:
+            logger.exception(f"Failed to delete shopping item. item_id={item_id}")
             return False
-        result = await self.collection.update_one(
-            {"_id": oid, "list_id": list_id, "is_deleted": False},
-            {"$set": {"is_deleted": True, "updated_at": datetime.utcnow()}},
-        )
-        return result.modified_count > 0
 
     async def mark_all_purchased(self, list_id: str) -> int:
         """

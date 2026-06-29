@@ -25,7 +25,7 @@ class ShoppingItemService:
         """Raise 404 if the parent shopping list does not exist."""
         doc = await self.list_repo.get_by_id(list_id)
         if not doc:
-            logger.error(f"Shopping list not found. list_id={list_id}")
+            logger.info(f"Shopping list not found. list_id={list_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
@@ -52,6 +52,15 @@ class ShoppingItemService:
             "updated_at": datetime.utcnow(),
         }
         result = await self.repo.create(list_id, doc)
+        if result is None:
+            logger.error(f"Failed to create item {list_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "message":"Failed to create item",
+                    "error_code":"ITEM_CREATE_FAILED"
+                }
+            )
         logger.info(f"Item created successfully. list_id={list_id} item_id={result['id']}")
         return result
 
@@ -101,8 +110,23 @@ class ShoppingItemService:
         Returns:
             Tuple of (list of item dicts, total count).
         """
-        await self._assert_list_exists(list_id)
-        return await self.repo.get_all(list_id=list_id, page=page, page_size=page_size, search=search)
+        try:
+            if search:
+                search=search.strip()
+            await self._assert_list_exists(list_id)
+            items,total= await self.repo.get_all(list_id=list_id, page=page, page_size=page_size, search=search)
+            logger.info(f"Successfully fetched shopping items. list_id={list_id}, count={len(items)}")
+            return items, total
+        except Exception:
+            logger.exception(f"Unable to fetch shopping items. list_id={list_id}")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message":"Unable to retrieve shopping items",
+                    "error_code":"DATABASE_ERROR"
+                }
+            )
+    
 
     async def get_item(self, list_id: str, item_id: str) -> dict:
         """
@@ -121,7 +145,7 @@ class ShoppingItemService:
         await self._assert_list_exists(list_id)
         doc = await self.repo.get_by_id(list_id, item_id)
         if not doc:
-            logger.error(f"Item not found. list_id={list_id} item_id={item_id}")
+            logger.info(f"Item not found. list_id={list_id} item_id={item_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"message": "Item not found", "error_code": "ITEM_NOT_FOUND"},

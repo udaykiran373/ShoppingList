@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from bson import ObjectId
 from bson.errors import InvalidId
 from app.utils.logger import get_logger
+from pymongo import ReturnDocument
 
 logger = get_logger(__name__)
 
@@ -34,10 +35,23 @@ class ShoppingListRepository:
         Returns:
             The created document with string id.
         """
-        data["is_deleted"] = False
-        result = await self.collection.insert_one(data)
-        doc = await self.collection.find_one({"_id": result.inserted_id})
-        return _to_response(doc)
+        try:
+            document={
+                **data,
+                "is_deleted":False
+            }
+        
+            result = await self.collection.insert_one(document)
+            doc = await self.collection.find_one({"_id": result.inserted_id})
+            if doc:
+                return _to_response(doc)
+                
+            logger.error(f"Inserted shopping list could not be retrieved. id={result.inserted_id}"
+)
+            return None
+        except Exception as e:
+            logger.exception(f"Failed to create shopping list {str(e)}")
+            return None
 
     async def get_all(
         self,
@@ -48,23 +62,22 @@ class ShoppingListRepository:
         """
         Retrieve all non-deleted shopping lists with optional name search and pagination.
 
-        Args:
-            page: Page number (1-based).
-            page_size: Number of results per page.
-            search: Optional substring to filter by name.
-
-        Returns:   
-            Tuple of (list of documents, total count).
         """
-        query: dict = {"is_deleted": False}
-        if search:
-            query["$text"] = {"$search": search}
+        try:
+            query: dict = {"is_deleted": False}
+            if search:
+                search.strip()
+            if search:
+                query["$text"] = {"$search": search}
 
-        total = await self.collection.count_documents(query)
-        skip = (page - 1) * page_size
-        cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(page_size)
-        docs = [_to_response(doc) async for doc in cursor]
-        return docs, total
+            total = await self.collection.count_documents(query)
+            skip = (page - 1) * page_size
+            cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(page_size)
+            docs = [_to_response(doc) async for doc in cursor]
+            return docs, total
+        except Exception:
+            logger.exception("Failed to retrieve shopping lists")
+            return [], 0
 
     async def get_by_id(self, list_id: str) -> Optional[dict]:
         """
@@ -77,15 +90,17 @@ class ShoppingListRepository:
             Document dict or None if not found.
         """
         try:
-            oid = ObjectId(list_id)
-            doc = await self.collection.find_one({"_id": oid, "is_deleted": False})
-            return _to_response(doc) if doc else None
-        except InvalidId:
-            logger.error(f"invalid id")
+            if not ObjectId.is_valid(list_id):
+                logger.warning(f"Invalid ObjectId recieved :{list_id}")
+                return None
+            doc = await self.collection.find_one({"_id": ObjectId(list_id), "is_deleted": False})
+            if doc:
+                return _to_response(doc)
+            logger.info(f"shopping list not found {list_id}")
             return None
 
         except Exception as e:
-            logger.error(f"unexpected error {str(e)}")
+            logger.exception(f"Failed to retrieve shopping list {str(e)}")
             return None
 
 
@@ -101,16 +116,23 @@ class ShoppingListRepository:
             Updated document dict or None if not found.
         """
         try:
-            oid = ObjectId(list_id)
-        except InvalidId:
+            if not ObjectId.is_valid(list_id):
+                logger.warning(f"invalid ObjectId recieved : {list_id}")
+                return None
+            update_data={**data,"updated_at":datetime.utcnow()}
+            result=await self.collection.find_one_and_update(
+                {"_id":ObjectId(list_id),"is_deleted":False},
+                {"$set":update_data},
+                return_document=ReturnDocument.After
+            )
+            if result:
+                return _to_response(result)
+            logger.info(f"shopping list not found : {list_id}")
             return None
-        data["updated_at"] = datetime.utcnow()
-        result = await self.collection.find_one_and_update(
-            {"_id": oid, "is_deleted": False},
-            {"$set": data},
-            return_document=True,
-        )
-        return _to_response(result) if result else None
+        except Exception as e:
+            logger.error(f"database error {str(e)}")
+            return None
+        
 
     async def soft_delete(self, list_id: str) -> bool:
         """
@@ -123,11 +145,17 @@ class ShoppingListRepository:
             True if deleted, False if not found.
         """
         try:
-            oid = ObjectId(list_id)
-        except InvalidId:
+            if not ObjectId.is_valid(list_id):
+                logger.info(f"invalid objectid received:{list_id}")
+
+            result = await self.collection.update_one(
+                {"_id": ObjectId(list_id), "is_deleted": False},
+                {"$set": {"is_deleted": True, "updated_at": datetime.utcnow()}}
+            )
+            if result.modified_count==0:
+                logger.info(f"shoppinglist not found for deletion {list_id}")
+                return False
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to delete shoppinglist {list_id}")
             return False
-        result = await self.collection.update_one(
-            {"_id": oid, "is_deleted": False},
-            {"$set": {"is_deleted": True, "updated_at": datetime.utcnow()}},
-        )
-        return result.modified_count > 0

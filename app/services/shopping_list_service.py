@@ -38,7 +38,16 @@ class ShoppingListService:
             "updated_at": datetime.utcnow(),
         }
         result = await self.repo.create(doc)
-        logger.info(f"Shopping list created successfully. list_id={result['id']}")
+        if result is None:
+            logger.error("Failed to create shopping list.")
+            raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                      "message": "Failed to create shopping list",
+                      "error_code": "SHOPPING_LIST_CREATE_FAILED"
+                    }
+            )
+        logger.info(f"shopping list created succesfully list_id={result['id']}")
         return result
 
     async def get_all_shopping_lists(
@@ -58,6 +67,8 @@ class ShoppingListService:
         Returns:
             Tuple of (list of shopping list dicts, total count).
         """
+        if search:
+            search = search.strip()
         return await self.repo.get_all(page=page, page_size=page_size, search=search)
 
     async def get_shopping_list(self, list_id: str) -> dict:
@@ -78,7 +89,7 @@ class ShoppingListService:
         if doc:
              return doc
 
-        logger.error(f"Shopping list not found. list_id={list_id}")
+        logger.info(f"Shopping list not found. list_id={list_id}")
         raise HTTPException(
            status_code=status.HTTP_404_NOT_FOUND,
            detail={
@@ -109,7 +120,7 @@ class ShoppingListService:
             )
         result = await self.repo.update(list_id, updates)
         if not result:
-            logger.error(f"Shopping list not found for update. list_id={list_id}")
+            logger.info(f"Shopping list not found for update. list_id={list_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
@@ -129,7 +140,7 @@ class ShoppingListService:
         """
         deleted = await self.repo.soft_delete(list_id)
         if not deleted:
-            logger.error(f"Shopping list not found for deletion. list_id={list_id}")
+            logger.info(f"Shopping list not found for deletion. list_id={list_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"message": "Shopping list not found", "error_code": "SHOPPING_LIST_NOT_FOUND"},
