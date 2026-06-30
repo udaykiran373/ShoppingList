@@ -3,7 +3,7 @@ name: Docker CD Pipeline
 on:
   push:
     branches:
-      - docker-assignment
+      - main
   workflow_dispatch:
 
 env:
